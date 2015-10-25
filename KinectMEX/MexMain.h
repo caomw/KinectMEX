@@ -28,5 +28,4 @@ template <class T> void SafeRelease(T **ppT)
 
 bool commandIs(const mxArray* mxCommand, const char* command);
 void processInit(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]);
-void processNextFrame(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]);
 void exitCB();
