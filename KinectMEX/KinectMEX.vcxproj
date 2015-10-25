@@ -10,6 +10,12 @@
       <Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="MexMain.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="MexMain.h" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{5B205DD0-9687-4EDA-B773-8856134ABB62}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
