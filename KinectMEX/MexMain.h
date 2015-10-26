@@ -6,7 +6,8 @@
 typedef struct kcontext
 {
 	IKinectSensor* sensor;
-	IMultiSourceFrameReader* reader;
+	IDepthFrameReader* dr;
+	IColorFrameReader* cr;
 	int depthframewidth;
 	int depthframeheight;
 	int colorframewidth;

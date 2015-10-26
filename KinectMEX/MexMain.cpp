@@ -23,7 +23,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 	}
 
 	mexPrintf("%d", GetCurrentThreadId());
-	mexLock();
 	mexAtExit(exitCB);
 }
 
@@ -58,7 +57,8 @@ void processInit(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 {
 	HRESULT hr;
 	IKinectSensor *sensor;
-	IMultiSourceFrameArrivedEventArgs* pMultiArgs;
+	IColorFrameSource *cs;
+	IDepthFrameSource *ds;
 	context = new KMcontext();
 
 
@@ -71,54 +71,34 @@ void processInit(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 	{
 		return;
 	}
-	sensor->OpenMultiSourceFrameReader(FrameSourceTypes_Color | FrameSourceTypes_Depth, &(context->reader));
+	sensor->get_ColorFrameSource(&cs);
+	sensor->get_DepthFrameSource(&ds);
+	cs->OpenReader(&(context->cr));
+	ds->OpenReader(&(context->dr));
 	context->sensor = sensor;
 	mexPrintf("%d", GetCurrentThreadId());
 }
 
 void processNextFrame(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 {
-	if (context == NULL || context->reader == NULL)
+	if (context == NULL || context->cr == NULL)
 	{
 		mexPrintf("Not inited");
 		return;
 	}
-	IMultiSourceFrame* pMultiFrame = NULL;
-	IColorFrame* colorframe;
-	IDepthFrame* depthframe;
-	IMultiSourceFrameReader* reader = context->reader;
-	HRESULT hr;
-	pMultiFrame = NULL;
+	HRESULT hr = E_FAIL;
 	mexPrintf("%d", GetCurrentThreadId());
-	hr = reader->AcquireLatestFrame(&pMultiFrame);
-	
-	while (FAILED(hr))
-	{
-		hr = reader->AcquireLatestFrame(&pMultiFrame);
-	}
-	IColorFrameReference* pColorRef;
-	IColorFrame* pColorFrame;
+	IColorFrame* pColorFrame = NULL;
+	IDepthFrame* pDepthFrame = NULL;
 	IFrameDescription *pColorFrameDescription, *pDepthFrameDescription;
 	UINT depthlength, colorlength;
 	UINT16* depthdata;
 	BYTE* colordata;
 
-	IDepthFrameReference* pDepthRef;
-	IDepthFrame* pDepthFrame;
-
-	pMultiFrame->get_DepthFrameReference(&pDepthRef);
-	pMultiFrame->get_ColorFrameReference(&pColorRef);
-	//Acquire frame as soon as possible, otherwise the frame will be lost.
-	pColorRef->AcquireFrame(&pColorFrame);
-	pDepthRef->AcquireFrame(&pDepthFrame);
-
-	if (pColorFrame == NULL || pDepthFrame == NULL)
+	while (pColorFrame==NULL)
 	{
-		return;
+		hr = context->cr->AcquireLatestFrame(&pColorFrame);
 	}
-	pDepthFrame->AccessUnderlyingBuffer(&depthlength, &depthdata);
-
-
 	ColorImageFormat imageFormat;
 
 	pColorFrame->get_RawColorImageFormat(&imageFormat);
@@ -126,14 +106,53 @@ void processNextFrame(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]
 	pColorFrame->get_FrameDescription(&pColorFrameDescription);
 	pColorFrameDescription->get_Width(&(context->colorframewidth));
 	pColorFrameDescription->get_Height(&(context->colorframeheight));
+	int colorBufferSize = context->colorframeheight*context->colorframewidth*sizeof(RGBQUAD);
+	colordata = new BYTE[colorBufferSize];
 
 	if (imageFormat == ColorImageFormat_Bgra)
 	{
 		pColorFrame->AccessRawUnderlyingBuffer(&colorlength, &colordata);
 	}
-	else {
-		return;
+	else
+	{
+		hr = pColorFrame->CopyConvertedFrameDataToArray(colorBufferSize, colordata, ColorImageFormat_Bgra);
 	}
+
+	mxArray* rData = mxCreateNumericMatrix(context->colorframeheight, context->colorframewidth, mxUINT8_CLASS, mxREAL);
+	mxArray* gData = mxCreateNumericMatrix(context->colorframeheight, context->colorframewidth, mxUINT8_CLASS, mxREAL);
+	mxArray* bData = mxCreateNumericMatrix(context->colorframeheight, context->colorframewidth, mxUINT8_CLASS, mxREAL);
+	int k = 0;
+	int colNum = mxGetN(rData);
+	int rowNum = mxGetM(rData);
+	UINT8* rPt = (UINT8*)mxGetData(rData);
+	UINT8* gPt = (UINT8*)mxGetData(gData);
+	UINT8* bPt = (UINT8*)mxGetData(bData);
+	for (int i = 0; i < rowNum; i++)
+	{
+		for (int j = 0; j < colNum; j++)
+		{
+			*(bPt + i + j*rowNum) = colordata[k++];
+			*(gPt + i + j*rowNum) = colordata[k++];
+			*(rPt + i + j*rowNum) = colordata[k++];
+			k++;
+		}
+	}
+	mxArray* tmpArray[4];
+	const mwSize dims[] = { 1 };
+	mxArray* numDim = mxCreateNumericArray(1, dims, mxINT32_CLASS, mxREAL);
+	UINT32* numPtr = (UINT32*)mxGetData(numDim);
+	*numPtr = 3;
+	tmpArray[0] = numDim; tmpArray[1] = rData; tmpArray[2] = gData; tmpArray[3] = bData;
+	mexCallMATLAB(1, &(plhs[1]), 4, tmpArray, "cat");
+	SafeRelease(&pColorFrameDescription);
+	SafeRelease(&pColorFrame);
+
+
+	while (pDepthFrame==NULL)
+	{
+		hr = context->dr->AcquireLatestFrame(&pDepthFrame);
+	}
+	pDepthFrame->AccessUnderlyingBuffer(&depthlength, &depthdata);
 
 	pDepthFrame->get_FrameDescription(&pDepthFrameDescription);
 	pDepthFrameDescription->get_Height(&(context->depthframeheight));
@@ -150,44 +169,14 @@ void processNextFrame(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]
 	mxSetN(tmpMat, context->depthframeheight);
 	mexCallMATLAB(1, &(plhs[0]), 1, &tmpMat, "transpose");
 
-	mxArray* rData = mxCreateNumericMatrix(context->colorframeheight, context->colorframewidth, mxUINT8_CLASS, mxREAL);
-	mxArray* gData = mxCreateNumericMatrix(context->colorframeheight, context->colorframewidth, mxUINT8_CLASS, mxREAL);
-	mxArray* bData = mxCreateNumericMatrix(context->colorframeheight, context->colorframewidth, mxUINT8_CLASS, mxREAL);
-	int k = 0;
-	int colNum = mxGetN(rData);
-	int rowNum = mxGetM(rData);
-	UINT8* rPt = (UINT8*)mxGetData(rData);
-	UINT8* gPt = (UINT8*)mxGetData(gData);
-	UINT8* bPt = (UINT8*)mxGetData(bData);
-	for (int i = 0; i < colNum; i++)
-	{
-		for (int j = 0; j < rowNum; j++)
-		{
-			*(bPt + i*colNum + j) = colordata[k++];
-			*(gPt + i*colNum + j) = colordata[k++];
-			*(rPt + i*colNum + j) = colordata[k++];
-			k++;
-		}
-	}
-	mxArray* tmpArray[4];
-	const mwSize dims[] = { 1 };
-	mxArray* numDim = mxCreateNumericArray(1, dims, mxINT32_CLASS, mxREAL);
-	UINT32* numPtr = (UINT32*)mxGetData(numDim);
-	*numPtr = 3;
-	tmpArray[0] = numDim; tmpArray[1] = rData; tmpArray[2] = gData; tmpArray[3] = bData;
-	mexCallMATLAB(1, &(plhs[1]), 4, tmpArray, "cat");
 	nlhs = 2;
-	SafeRelease(&pDepthRef);
-	SafeRelease(&pColorRef);
-	SafeRelease(&pColorFrameDescription);
-	SafeRelease(&pColorFrame);
 	SafeRelease(&pDepthFrameDescription);
 	SafeRelease(&pDepthFrame);
-	SafeRelease(&pMultiFrame);
 }
 
 void exitCB()
 {
-	SafeRelease(&(context->reader));
+	SafeRelease(&(context->cr));
+	SafeRelease(&(context->dr));
 	SafeRelease(&(context->sensor));
 }
