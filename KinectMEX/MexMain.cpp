@@ -22,6 +22,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 		processNextFrame(nlhs, plhs, nrhs, prhs);
 	}
 
+	mexPrintf("%d", GetCurrentThreadId());
+	mexLock();
 	mexAtExit(exitCB);
 }
 
@@ -71,6 +73,7 @@ void processInit(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 	}
 	sensor->OpenMultiSourceFrameReader(FrameSourceTypes_Color | FrameSourceTypes_Depth, &(context->reader));
 	context->sensor = sensor;
+	mexPrintf("%d", GetCurrentThreadId());
 }
 
 void processNextFrame(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
@@ -81,18 +84,17 @@ void processNextFrame(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]
 		return;
 	}
 	IMultiSourceFrame* pMultiFrame = NULL;
-	IMultiSourceFrameReference* pMultiRef;
 	IColorFrame* colorframe;
 	IDepthFrame* depthframe;
 	IMultiSourceFrameReader* reader = context->reader;
 	HRESULT hr;
 	pMultiFrame = NULL;
-
+	mexPrintf("%d", GetCurrentThreadId());
 	hr = reader->AcquireLatestFrame(&pMultiFrame);
-	if (!SUCCEEDED(hr))
+	
+	while (FAILED(hr))
 	{
-		_com_error(hr).ErrorMessage();
-		return;
+		hr = reader->AcquireLatestFrame(&pMultiFrame);
 	}
 	IColorFrameReference* pColorRef;
 	IColorFrame* pColorFrame;
@@ -115,6 +117,7 @@ void processNextFrame(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]
 		return;
 	}
 	pDepthFrame->AccessUnderlyingBuffer(&depthlength, &depthdata);
+
 
 	ColorImageFormat imageFormat;
 
@@ -174,6 +177,13 @@ void processNextFrame(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]
 	tmpArray[0] = numDim; tmpArray[1] = rData; tmpArray[2] = gData; tmpArray[3] = bData;
 	mexCallMATLAB(1, &(plhs[1]), 4, tmpArray, "cat");
 	nlhs = 2;
+	SafeRelease(&pDepthRef);
+	SafeRelease(&pColorRef);
+	SafeRelease(&pColorFrameDescription);
+	SafeRelease(&pColorFrame);
+	SafeRelease(&pDepthFrameDescription);
+	SafeRelease(&pDepthFrame);
+	SafeRelease(&pMultiFrame);
 }
 
 void exitCB()
