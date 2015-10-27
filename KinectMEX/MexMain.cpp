@@ -22,7 +22,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 		processNextFrame(nlhs, plhs, nrhs, prhs);
 	}
 
-	mexPrintf("%d", GetCurrentThreadId());
 	mexAtExit(exitCB);
 }
 
@@ -76,7 +75,8 @@ void processInit(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
 	cs->OpenReader(&(context->cr));
 	ds->OpenReader(&(context->dr));
 	context->sensor = sensor;
-	mexPrintf("%d", GetCurrentThreadId());
+	SafeRelease(&cs);
+	SafeRelease(&ds);
 }
 
 void processNextFrame(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
@@ -86,8 +86,7 @@ void processNextFrame(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]
 		mexPrintf("Not inited");
 		return;
 	}
-	HRESULT hr = E_FAIL;
-	mexPrintf("%d", GetCurrentThreadId());
+	HRESULT hr = E_UNEXPECTED;
 	IColorFrame* pColorFrame = NULL;
 	IDepthFrame* pDepthFrame = NULL;
 	IFrameDescription *pColorFrameDescription, *pDepthFrameDescription;
@@ -179,4 +178,5 @@ void exitCB()
 	SafeRelease(&(context->cr));
 	SafeRelease(&(context->dr));
 	SafeRelease(&(context->sensor));
+	delete context;
 }
